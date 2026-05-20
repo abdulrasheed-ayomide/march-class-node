@@ -1,41 +1,42 @@
 const user = require("../models/user");
 const bcrypt = require("bcrypt");
 const envObj = require("../config/env");
-const jwt = require("jsonwebtoken")
+const jwt = require("jsonwebtoken");
 const { validationResult } = require("express-validator");
-const { sendWelcomingEmail, sendVerificationEmail } = require("../utils/email");
+
+const {
+    sendWelcomingEmail,
+    sendVerificationEmail
+} = require("../utils/email");
 
 
-// REGISTER A NEW USER
+
+// ========================================
+// REGISTER USER
+// ========================================
+
 const register = async (req, res) => {
+
     const errors = validationResult(req);
 
     if (!errors.isEmpty()) {
         return res.status(400).json({
-            errors: errors.array()?.[0].msg
+            message: errors.array()?.[0]?.msg
         });
     }
 
     const { name, email, password, age } = req.body;
 
-    // GENERATE OTP
-    let otp = Math.floor(100000 + Math.random() * 900000).toString();
-
     try {
-        // if otp exixts, regenerate another otp cus if one thousand users register at the same time, they might get the same otp and that will cause a problem when they try to verify their email
-        const existingOtp = await user.findOne({ verificationCode: otp });
-        if (existingOtp) {
-            otp = Math.floor(100000 + Math.random() * 900000).toString();
-        }
 
-
+        // CHECK REQUIRED FIELDS
         if (!name || !email || !password || !age) {
             return res.status(400).json({
                 message: "All fields are required"
             });
         }
 
-        // Check existing user
+        // CHECK EXISTING USER
         const existingUser = await user.findOne({ email });
 
         if (existingUser) {
@@ -44,12 +45,26 @@ const register = async (req, res) => {
             });
         }
 
-        // Hash password
-        const salt = 12;
+        // GENERATE UNIQUE OTP
+        let otp;
+        let existingOtp;
 
-        const hashedPassword = await bcrypt.hash(password, salt);
+        do {
 
-        // Create new user
+            otp = Math.floor(
+                100000 + Math.random() * 900000
+            ).toString();
+
+            existingOtp = await user.findOne({
+                verificationCode: otp
+            });
+
+        } while (existingOtp);
+
+        // HASH PASSWORD
+        const hashedPassword = await bcrypt.hash(password, 12);
+
+        // CREATE USER
         const newUser = new user({
             name,
             email,
@@ -58,133 +73,53 @@ const register = async (req, res) => {
 
             verificationCode: otp,
 
-            isverified: false,
+            verificationCodeExpires:
+                Date.now() + 10 * 60 * 1000,
+
+            isverified: false
         });
 
-        // Save user
+        // SAVE USER
         await newUser.save();
 
         // SEND OTP EMAIL
         await sendVerificationEmail(email, otp);
 
         return res.status(201).json({
+            status: true,
             message: "OTP sent to your email"
         });
 
     } catch (error) {
+
         console.log(error.message);
 
         return res.status(500).json({
+            status: false,
             message: "Internal server error"
         });
     }
 };
 
-// LOGIN A USER
 
-const login = async (req, res) => {
 
-    const errors = validationResult(req);
+// ========================================
+// VERIFY EMAIL / OTP
+// ========================================
 
-    if (!errors.isEmpty()) {
-        // 3. Respond with a 400 status and the list of errors
-        return res.status(400).json({ errors: errors.array()?.[0].msg });
-    }
-    const { email, password } = req.body;
-
-    try {
-        if (!email || !password) {
-            return res.status(400).json({ message: "All fields are required" })
-        }
-
-        // Find the user by email
-        const existingUser = await user.findOne({ email })
-        if (!existingUser) {
-            return res.status(400).json({ message: "Invalid credentials" })
-        }
-        // console.log(existingUser.isverified, ".....isverified line 105");
-        if (!existingUser.isVerified) {
-
-            // GENERATE NEW OTP
-            const otp = Math.floor(
-                100000 + Math.random() * 900000
-            ).toString();
-
-            // SAVE NEW OTP
-            existingUser.verificationCode = otp;
-
-            await existingUser.save();
-
-            // SEND NEW OTP
-            await sendVerificationEmail(
-                existingUser.email,
-                otp
-            );
-
-            return res.status(400).json({
-                message:
-                    "Email not verified. New OTP sent to your email"
-            });
-        }
-
-        // Compare the provided password with the hashed password
-        const isMatch = await bcrypt.compare(password, existingUser.password)
-        console.log(isMatch);
-
-        if (!isMatch) {
-            return res.status(400).json({ message: "Invalid credentials" })
-        }
-
-        const token = jwt.sign({ userId: existingUser._id }, envObj.jwtSecret, { expiresIn: envObj.jwtExpiresIn })
-
-        //  res.status(200).json({ message: "Login successful", token })
-        const userData = {
-            name: existingUser.name,
-            id: existingUser._id,
-            gender: existingUser.gender,
-            email: existingUser.email,
-            age: existingUser.age,
-        };
-        res.status(200).json({
-            status: true,
-            message: "Login successfully",
-            token,
-            user: userData,
-        });
-
-    } catch (error) {
-
-        console.log(error.message);
-        return res.status(500).json({ message: "Internal server error" })
-    }
-}
-
-//CURRENT USER
-const currentUser = async (req, res) => {
-
-    // Assuming you have the user ID stored in the request object after authentication
-    const userId = req.user.userId;
-    console.log(userId, "userId");
-
-    if (!userId) {
-        return res.status(404).json(null)
-    }
-
-    // Exclude the password field from the response}
-    const userData = await user.findById(userId).select("-password");
-
-    res.json({ user: userData })
-
-}
-
-// VERIFY EMAIL
 const verifyEmail = async (req, res) => {
+
     try {
 
         const { email, otp } = req.body;
 
-        console.log(req.body);
+        if (!email || !otp) {
+            return res.status(400).json({
+                message: "Email and OTP are required"
+            });
+        }
 
+        // FIND USER
         const existingUser = await user.findOne({ email });
 
         if (!existingUser) {
@@ -192,45 +127,264 @@ const verifyEmail = async (req, res) => {
                 message: "User not found"
             });
         }
-        console.log(existingUser);
 
-
-        console.log(existingUser.verificationCode);
-        console.log(otp);
-
+        // CHECK OTP
         if (
             !existingUser.verificationCode ||
             existingUser.verificationCode.toString() !== otp.toString()
         ) {
             return res.status(400).json({
-                message: "Invalid or expired OTP"
+                message: "Invalid OTP"
             });
         }
 
+        // CHECK OTP EXPIRATION
+        if (
+            existingUser.verificationCodeExpires <
+            Date.now()
+        ) {
+            return res.status(400).json({
+                message: "OTP expired"
+            });
+        }
+
+        // VERIFY USER
         existingUser.isverified = true;
 
+        // CHECK IF USER IS VERIFIED
+        // if (!existingUser.isverified) {
+
+        //     return res.status(400).json({
+        //         verified: false,
+        //         email: existingUser.email,
+        //         message: "Please verify your email first"
+        //     });
+        // }
+
+        // CLEAR OTP
+        existingUser.isverified = true;
         existingUser.verificationCode = null;
+        existingUser.verificationCodeExpires = null;
 
         await existingUser.save();
 
-        console.log(existingUser.email);
-
+        // SEND WELCOME EMAIL
         await sendWelcomingEmail(
             existingUser.name,
             existingUser.email
         );
 
         return res.status(200).json({
+            status: true,
             message: "Email verified successfully"
         });
 
     } catch (error) {
 
-        console.log(error);
+        console.log(error.message);
+
+        return res.status(500).json({
+            status: false,
+            message: "Internal server error"
+        });
+    }
+};
+
+
+
+// ========================================
+// LOGIN USER
+// ========================================
+
+const login = async (req, res) => {
+
+    const errors = validationResult(req);
+
+    if (!errors.isEmpty()) {
+        return res.status(400).json({
+            message: errors.array()?.[0]?.msg
+        });
+    }
+
+    const { email, password } = req.body;
+
+    try {
+
+        // CHECK REQUIRED FIELDS
+        if (!email || !password) {
+            return res.status(400).json({
+                message: "All fields are required"
+            });
+        }
+
+        // FIND USER
+        const existingUser = await user.findOne({ email });
+
+        if (!existingUser) {
+            return res.status(400).json({
+                message: "Invalid credentials"
+            });
+        }
+
+        // CHECK IF VERIFIED
+        if (!existingUser.isverified) {
+
+            return res.status(400).json({
+                verified: false,
+                email: existingUser.email,
+                message: "Please verify your email first"
+            });
+        }
+
+        // VERIFY PASSWORD
+        const verifyPassword = await bcrypt.compare(
+            password,
+            existingUser.password
+        );
+
+        if (!verifyPassword) {
+            return res.status(400).json({
+                message: "Invalid credentials"
+            });
+        }
+
+        // GENERATE TOKEN
+        const token = jwt.sign(
+            {
+                userId: existingUser._id
+            },
+            envObj.jwtSecret,
+            {
+                expiresIn: envObj.jwtExpiresIn
+            }
+        );
+
+        // USER DATA
+        const userData = {
+            id: existingUser._id,
+            name: existingUser.name,
+            email: existingUser.email,
+            age: existingUser.age,
+            gender: existingUser.gender
+        };
+
+        return res.status(200).json({
+            status: true,
+            message: "Login successful",
+            token,
+            user: userData
+        });
+
+    } catch (error) {
+
+        console.log(error.message);
+
+        return res.status(500).json({
+            status: false,
+            message: "Internal server error"
+        });
+    }
+};
+
+
+
+// ========================================
+// CURRENT USER
+// ========================================
+
+const currentUser = async (req, res) => {
+
+    try {
+
+        const userId = req.user.userId;
+
+        if (!userId) {
+            return res.status(401).json({
+                message: "Unauthorized"
+            });
+        }
+
+        const userData = await user
+            .findById(userId)
+            .select("-password");
+
+        if (!userData) {
+            return res.status(404).json({
+                message: "User not found"
+            });
+        }
+
+        return res.status(200).json({
+            user: userData
+        });
+
+    } catch (error) {
+
+        console.log(error.message);
 
         return res.status(500).json({
             message: "Internal server error"
         });
     }
 };
-module.exports = { register, login, currentUser, verifyEmail }
+
+
+// ========================================
+// RESEND / OTP
+// ========================================
+
+const resendOtp = async (req, res) => {
+
+    try {
+
+        const { email } = req.body;
+
+        const existingUser = await user.findOne({
+            email
+        });
+
+        if (!existingUser) {
+            return res.status(404).json({
+                message: "User not found"
+            });
+        }
+
+        // GENERATE NEW OTP
+        const otp = Math.floor(
+            100000 + Math.random() * 900000
+        ).toString();
+
+        existingUser.verificationCode = otp;
+
+        existingUser.verificationCodeExpires =
+            Date.now() + 10 * 60 * 1000;
+
+        await existingUser.save();
+
+        await sendVerificationEmail(
+            email,
+            otp
+        );
+
+        return res.status(200).json({
+            message: "New OTP sent"
+        });
+
+    } catch (error) {
+
+        console.log(error.message);
+
+        return res.status(500).json({
+            message: "Internal server error"
+        });
+    }
+}
+
+
+module.exports = {
+    register,
+    login,
+    currentUser,
+    verifyEmail,
+    resendOtp
+};

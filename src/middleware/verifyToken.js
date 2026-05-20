@@ -3,6 +3,7 @@ const envObj = require("../config/env")
 
 const authMiddleWare = (req, res, next) => {
     const authHeader = req.headers.authorization;
+    console.log(authHeader, "auth header");
 
     if (!authHeader) {
         return res.status(401).json({ message: "Unauthorized" })
