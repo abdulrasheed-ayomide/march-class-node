@@ -12,11 +12,12 @@ const { verifyTransport, sendMail, sendVerificationEmail } = require("./utils/em
 
 // Then initialize express by calling the express function and storing it in a variable called app
 const app = express();
-app.use(express.json()) // This line is used to parse the incoming request body as JSON, it allows us to access the data sent in the request body as a JavaScript object in our route handlers.
 
 app.use(cors({
-    origin: "http://localhost:5173"
+    origin: "https://march-class-react.vercel.app"
 })) // This line is used to enable Cross-Origin Resource Sharing (CORS) for our server, it allows our server to accept requests from different origins (domains) which is important when we are building a frontend application that will consume our API.
+
+app.use(express.json()) // This line is used to parse the incoming request body as JSON, it allows us to access the data sent in the request body as a JavaScript object in our route handlers.
 const port = envObj.port
 
 app.use("/api/routes", userRoute);
