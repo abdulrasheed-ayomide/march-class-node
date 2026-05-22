@@ -8,6 +8,7 @@ const productRoute = require('./routes/product');
 const cors = require('cors');
 const todoRoute = require('./routes/todoapp');
 const { verifyTransport, sendMail, sendVerificationEmail } = require("./utils/email");
+const adminRoutes = require("./routes/admin");
 
 
 // Then initialize express by calling the express function and storing it in a variable called app
@@ -23,6 +24,7 @@ const port = envObj.port
 app.use("/api/routes", userRoute);
 app.use("/api/product", productRoute);
 app.use("/api/todo", todoRoute);
+app.use("/api/admin", adminRoutes);
 
 // Creating Endpoint to get all products, when we access the /products route in the browser, it will return the product array as a response
 // app.get('/products', (req, res) => {
